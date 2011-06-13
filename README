@@ -1,0 +1,13 @@
+Scripts and tools for use with Team Foundation Server.  Includes:
+
+tfpurge.bat - Identifies large files in TFS version control and automatically
+              generates a list of tf.exe commands that can be used to destroy
+              older revisions of those files in order to conserve space.
+
+              Tested under Strawberry Perl 5.12.3 together with Team Foundation
+              Server 2008.
+ 
+              This is a Perl script, but is wrapped in a batch file so that it
+              may be run directly even if a file association for .pl files has
+              not been defined.  Assumes that perl.exe and tf.exe are found in
+              %PATH%.
