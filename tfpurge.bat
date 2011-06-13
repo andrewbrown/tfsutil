@@ -34,8 +34,9 @@ goto endofperl
 # EXAMPLE USAGE: 
 # tfspurge.pl --server tfs.mydomain.local --root $/MyProject --threshold 16777216
 #
-# Note that --threshold and --keepcount are optional (defaults are 
-# 16MB and 5, respectively); the other arguments are required.
+# Note that --threshold, --keepcount, and --keepdate are optional 
+# (defaults are 16MB, 5, and 'unset', respectively); the other arguments
+# are required.
 #
 # ----------------------------------------------------------------------
 #
@@ -65,7 +66,7 @@ goto endofperl
 use Cwd;
 use File::Temp qw(tempfile tempdir);
 use Getopt::Long;
-use List::Util qw(min);
+use List::Util qw(min max);
 use POSIX;
 use Scalar::Util qw(looks_like_number);
 use Time::Piece;
@@ -137,6 +138,11 @@ foreach (@tflarge) {
     if ($stopat == -1) {
 	print "\@rem Skip $_ , not enough history to destroy.\n";
     }
+    # Destroy all history
+    elsif ($stopat == INT_MAX) {
+	print "tf destroy $_ /keephistory\n";
+    }
+    # Destroy history up to specified changeset.
     else {
 	print "tf destroy $_ /keephistory /stopat:C$stopat\n";
     }
@@ -313,7 +319,7 @@ sub tf_find_destroy_stoppoint ($$;$) {
     foreach (@header_indices) { debug_print "Header at index: $_", 1 }
     
     my %changesets;
-    my $datepruned = 0; # Keep track of whether we are discarding history based on date.
+    my $datepruned = 0; # Keep track of how many changesets we will want to destroy based on date.
     
     for my $history_line (@tf_history) {
 	my $cs   = trim(substr($history_line, $header_indices[0], $header_indices[1] - $header_indices[0]));
@@ -325,13 +331,10 @@ sub tf_find_destroy_stoppoint ($$;$) {
 	
 	# Changeset is older than our minimum keep date, so we will not keep.
 	if ($min_keep_date && ($date < $min_keep_date)) {
-	    $datepruned = 1;
+	    $datepruned++;
 	}
-	# We may keep it, depending on how many changesets we see in total.
-	else
-	{
-	    $changesets{$cs} = $date;
-	}
+
+	$changesets{$cs} = $date;
     }
     
     # Reverse sort by changeset.
@@ -354,18 +357,20 @@ sub tf_find_destroy_stoppoint ($$;$) {
     }
 
     # We expect that *some* history exists for every file.
-    die "History not found for $tf_serverfile." if $#changesets_descending <= 0;
-    
-    if ($datepruned) {
-	$min_changeset_keep_count = min($min_changeset_keep_count, min($#changesets_descending, 1));
-    }
+    die "History not found for $tf_serverfile." if $#changesets_descending < 0;
+
+    # Use $datepruned to remove changesets older than our datethreshold, but keep at least one.
+    #
+    # Then keep either the number of most recent changes the user requested, or the number 
+    # remaining after date pruning, whichever is fewer.
+    $min_changeset_keep_count = min($min_changeset_keep_count, (max(0, ($#changesets_descending + 1) - $datepruned)) || 1);
 
     # The entire history is to be destroyed.
     if ($min_changeset_keep_count == 0) { 
 	return INT_MAX; 
     }
     # We have to keep more changesets than exist, so destroy nothing.
-    elsif ($#changesets_descending < $min_changeset_keep_count) { 
+    elsif (($#changesets_descending + 1) < $min_changeset_keep_count) { 
 	return -1; 
     }
     # Return the oldest changeset that should be kept.
